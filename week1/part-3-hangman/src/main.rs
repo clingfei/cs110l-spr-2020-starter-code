@@ -16,6 +16,7 @@ extern crate rand;
 use rand::Rng;
 use std::fs;
 use std::io;
+use std::io::Read;
 use std::io::Write;
 
 const NUM_INCORRECT_GUESSES: u32 = 5;
@@ -27,6 +28,13 @@ fn pick_a_random_word() -> String {
     String::from(words[rand::thread_rng().gen_range(0, words.len())].trim())
 }
 
+fn print_hints(left_guesses: &u32, guessed_strings: &String, word: String) {
+    println!("The word so far is {}", word);
+    println!("You have guessed the following letters: {}", guessed_strings);
+    println!("You have {} guesses left", left_guesses);
+    print!("Please guess a letter: ");
+}
+
 fn main() {
     let secret_word = pick_a_random_word();
     // Note: given what you know about Rust so far, it's easier to pull characters out of a
@@ -34,7 +42,47 @@ fn main() {
     // secret_word by doing secret_word_chars[i].
     let secret_word_chars: Vec<char> = secret_word.chars().collect();
     // Uncomment for debugging:
-    // println!("random word: {}", secret_word);
-
+    println!("random word: {}", secret_word);
+    let mut left_guesses = NUM_INCORRECT_GUESSES;
+    let mut guessed_letters: String = String::new();
+    let mut word = vec!['-'; secret_word_chars.len()];
     // Your code here! :)
+    //如何读取字符？
+    loop{
+        print_hints(&left_guesses, &guessed_letters, word.iter().collect());
+        io::stdout().flush().expect("Error flushing stdout.");
+        let mut guess = String::new();
+        io::stdin().read_line(&mut guess).expect("Error reading line.");
+
+        let c = guess.chars().nth(0).unwrap();
+        if word.contains(&c) {
+            continue;
+        }
+        if !secret_word_chars.contains(&c) {
+            println!("Sorry, that letter is not in the word");
+            guessed_letters.push(c);
+            if left_guesses > 0 {
+                left_guesses -= 1;
+            }
+        }
+        if left_guesses == 0 {
+            println!();
+            println!("Sorry, you ran out of guesses!");
+            break;
+        }
+        for (i, ch) in secret_word_chars.iter().enumerate() {
+            if *ch == c {
+                word[i] = c;
+            }
+        }
+        if word == secret_word_chars {
+            println!();
+            println!(
+                "Congratulations you guessed the secret word: {}",
+                secret_word
+            );
+            break;
+        }
+        println!();
+    }
 }

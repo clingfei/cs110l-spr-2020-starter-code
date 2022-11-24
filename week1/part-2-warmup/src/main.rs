@@ -1,21 +1,35 @@
 /* The following exercises were borrowed from Will Crichton's CS 242 Rust lab. */
 
-use std::collections::HashSet;
+use std::collections::{HashSet, btree_map::Iter};
 
 fn main() {
     println!("Hi! Try running \"cargo test\" to run tests.");
 }
 
 fn add_n(v: Vec<i32>, n: i32) -> Vec<i32> {
-    unimplemented!()
+    let mut vec = Vec::from(v);
+    for i in vec.iter_mut() {
+        *i += n;
+    }
+    return vec;
 }
 
 fn add_n_inplace(v: &mut Vec<i32>, n: i32) {
-    unimplemented!()
+    for value in v.iter_mut() {
+        *value += n;
+    }
 }
 
 fn dedup(v: &mut Vec<i32>) {
-    unimplemented!()
+    let mut set = HashSet::new();
+    let mut vec: Vec<i32> = Vec::new();
+    for value in v.into_iter() {
+        if !set.contains(value) {
+            set.insert(*value);
+            vec.push(*value);
+        }
+    }
+    *v = vec;
 }
 
 #[cfg(test)]
