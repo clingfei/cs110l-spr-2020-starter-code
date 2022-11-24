@@ -1,0 +1,6 @@
+[package]
+name = "LinkedList"
+version = "0.1.0"
+authors = ["Armin Namavari <arminn@stanford.edu>"]
+
+[dependencies]
