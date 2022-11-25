@@ -1,11 +1,13 @@
-use libc::exit;
 use nix::sys::ptrace;
 use nix::sys::signal;
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
 use std::process::{Child, Command};
-use std::thread::spawn;
 use std::os::unix::process::CommandExt;
+use std::mem::size_of;
+use std::collections::HashMap;
+use crate::debugger::BreakPoint;
+use crate::dwarf_data::DwarfData;
 
 pub enum Status {
     /// Indicates inferior stopped. Contains the signal that stopped the process, as well as the
@@ -33,10 +35,16 @@ pub struct Inferior {
     child: Child,
 }
 
+
+
+fn align_addr_to_word(addr: usize) -> usize {
+    addr & (-(size_of::<usize>() as isize) as usize)
+}
+
 impl Inferior {
     /// Attempts to start a new inferior process. Returns Some(Inferior) if successful, or None if
     /// an error is encountered.
-    pub fn new(target: &str, args: &Vec<String>) -> Option<Inferior> {
+    pub fn new(target: &str, args: &Vec<String>, breakpoints: &HashMap<usize, BreakPoint>) -> Option<Inferior> {
         // TODO: implement me!
         // println!(
         //     "Inferior::new not implemented! target={}, args={:?}",
@@ -48,7 +56,10 @@ impl Inferior {
             command.pre_exec(child_traceme);
         }
         let child = command.spawn().ok()?;
-        let inferior = Inferior{child};
+        let mut inferior = Inferior{child};
+        for (breakpoint, _) in breakpoints {
+            inferior.install_breakpoints(*breakpoint);
+        }
         Some(inferior)
     }
 
@@ -71,19 +82,85 @@ impl Inferior {
         })
     }
 
-    pub fn Continue(&self, signal: Option<signal::Signal>) -> Result<Status, nix::Error> {
+    pub fn continue_run(&self, signal: Option<signal::Signal>) -> Result<Status, nix::Error> {
         ptrace::cont(self.pid(), None)?;
         self.wait(None)
     }
 
-    pub fn kill(&mut self) {
-        
+    pub fn kill(&mut self) {  
         match self.child.kill().ok() {
             Some(_) => {
                 println!("Killing running inferior (pid {})", self.pid());
                 self.wait(None).unwrap();
             },
             None => {} 
+        }
+    }
+
+    pub fn print_backtrace(&self, debug_data: &DwarfData) -> Result<(), nix::Error> {
+        match ptrace::getregs(self.pid()) {
+            Ok(regs) => {
+                // Ok(println!("%rip register: {:#x}", regs.rip))
+                let mut instruction_ptr = regs.rip as usize;
+                let mut base_ptr = regs.rbp as usize;
+                loop {
+                    let line = DwarfData::get_line_from_addr(debug_data, instruction_ptr).unwrap();
+                    let function =  DwarfData::get_function_from_addr(debug_data, instruction_ptr).unwrap();
+                    println!("{} ({})", function, line);
+                    if function == "main" {
+                        break;
+                    }
+                    instruction_ptr = ptrace::read(self.pid(), (base_ptr + 8) as ptrace::AddressType)? as usize;
+                    base_ptr = ptrace::read(self.pid(), base_ptr as ptrace::AddressType)? as usize;
+                }
+                Ok(())
+            },
+            Err(err) => {
+                Err(err)
+            }
+        }
+    }
+
+    pub fn install_breakpoints(&mut self, breakpoint: usize) -> Result<u8, nix::Error> {
+        self.write_byte(breakpoint, 0xcc)
+    }
+
+    pub fn get_previous_ins(&self) -> Result<usize, nix::Error> {
+        let regs = ptrace::getregs(self.pid()).unwrap();
+        Ok(regs.rip as usize - 1)
+    }
+
+    pub fn write_byte(&mut self, addr: usize, val: u8) -> Result<u8, nix::Error> {
+        let aligned_addr = align_addr_to_word(addr);
+        let byte_offset = addr - aligned_addr;
+        let word = ptrace::read(self.pid(), aligned_addr as ptrace::AddressType)? as u64;
+        let orig_byte = (word >> 8 * byte_offset) & 0xff;
+        let masked_word = word & !(0xff << 8 * byte_offset);
+        let updated_word = masked_word | ((val as u64) << 8 * byte_offset);
+        ptrace::write(
+            self.pid(),
+            aligned_addr as ptrace::AddressType,
+            updated_word as *mut std::ffi::c_void,
+        )?;
+        Ok(orig_byte as u8)
+    }
+
+    pub fn step_breakpoint(&mut self, rip: usize, orin_byte: u8) -> bool {
+        // restore instruction
+        self.write_byte(rip, orin_byte).unwrap();
+        // rewind rip to the stopped instruction
+        let mut regs = ptrace::getregs(self.pid()).unwrap();
+        regs.rip = rip as u64;
+        ptrace::setregs(self.pid(), regs).unwrap();
+        // step one the original instruction
+        ptrace::step(self.pid(), None).unwrap();
+        // restore the breakpoint and return to resume the normal execution
+        match self.wait(None).unwrap() {
+            Status::Stopped(s, _) if s == signal::Signal::SIGTRAP => {
+                self.install_breakpoints(rip).unwrap();
+                true
+            }
+            _ => false,
         }
     }
 }
