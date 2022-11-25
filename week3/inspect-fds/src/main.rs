@@ -10,11 +10,25 @@ fn main() {
         println!("Usage: {} <name or pid of target>", args[0]);
         std::process::exit(1);
     }
-    #[allow(unused)] // TODO: delete this line for Milestone 1
+     // TODO: delete this line for Milestone 1
     let target = &args[1];
 
     // TODO: Milestone 1: Get the target Process using psutils::get_target()
-    unimplemented!();
+    let option_process = ps_utils::get_target(target).expect(format!("get_target {} failed", target).as_str());
+    match option_process {
+        // Some(process) => println!("pid: {}", process.pid),
+        Some(process) => {
+            process.print();
+            let children = ps_utils::get_child_processes(process.pid).ok().expect(format!("pid {} don't have children.", process.pid).as_str());
+            for child in children {
+                child.print();
+            }
+        },
+        None => {
+            println!("Process is None");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]
